@@ -147,6 +147,16 @@ const HEAD_ANCHORS = {
   // collar-patch accent (a consistent, distinctly-colored landmark right at
   // the neck in every frame) instead of raw silhouette height.
   death: [{"x":11.6,"y":10.9},{"x":10.6,"y":12.9},{"x":7.3,"y":24.3},{"x":8.3,"y":33.4},{"x":8.4,"y":38.6},{"x":9.0,"y":40.0},{"x":8.8,"y":42.4},{"x":8.5,"y":43.0}],
+  // blockLow (fighter.js's crouching half of the high/low guard mixup) and
+  // airKick (the aerial follow-up attack) are both real, mechanically
+  // distinct fighter.state values with no dedicated art of their own in
+  // this collection - see ANIMS.blockLow/ANIMS.airKick below, which draw
+  // them with the existing "crouch"/"kick" sheets instead of new stills.
+  // Copied verbatim from those same sheets' own anchor points above (rather
+  // than resampled) so the head actually follows the body for both reused
+  // poses instead of falling back to frameSize/2-ish guesswork.
+  blockLow: [{"x":40,"y":4}],
+  airKick: [{"x":42.0,"y":2},{"x":41.1,"y":3},{"x":39.8,"y":3},{"x":33.8,"y":3},{"x":43.5,"y":1},{"x":40.7,"y":-2},{"x":45.7,"y":5},{"x":42.3,"y":2}],
 };
 
 // Head art is always drawn upright by default (fine for every standing/
@@ -205,6 +215,21 @@ const ANIMS = {
   // frames the sheet's own impact FX actually shows the kick connecting.
   specialHigh: { sheet: "specialHigh", frames: 15, durationFrames: 45, loop: false },
   specialLow: { sheet: "specialLow", frames: 7, durationFrames: 28, loop: false },
+  // Crouch+block held together (fighter.js's "blockLow" state, the low half
+  // of the high/low guard mixup) - held as a single still, same shape as
+  // plain "crouch" above, since there's no dedicated crouching-guard art in
+  // this collection to cycle through. Sheet is "crouch" (see SHEETS above -
+  // no new sprite file), so this pose draws visually identical to a plain
+  // crouch; the guard itself is a fighter.state distinction, not a drawn
+  // one.
+  blockLow: { sheet: "crouch", frames: 1, durationFrames: 20, loop: false },
+  // Aerial follow-up attack (fighter.js's AIR_ATTACK/"airKick" state) - reuses
+  // the grounded "kick" sheet's own 8-frame swing rather than a dedicated
+  // aerial-strike still (none exists here). durationFrames matches
+  // AIR_ATTACK.duration in fighter.js exactly, not KICK.duration - this is a
+  // shorter, punchier hold than the grounded kick's own full animation, so
+  // frameIndex samples the same 8 frames faster.
+  airKick: { sheet: "kick", frames: 8, durationFrames: 16, loop: false },
 };
 
 const TINTS = {
@@ -611,6 +636,66 @@ export function drawHitSpark(ctx, x, y, frame) {
     size,
     size,
   );
+  ctx.restore();
+}
+
+// Combo "charge-up" swish trail (game.js's getComboFxTier) - three single
+// still images, not sheets, same as the blood-splat-extra decals above.
+// This escalation ladder (a genuine 5-tier combo readout using real swish/
+// pow/pop art instead of a CSS-filter tint hack on placeholder art) and the
+// PNGs it draws were ported wholesale from hoodchan-brawl's own combo-VFX
+// work - the art here is generic swirl/burst FX, not tied to any
+// character's likeness, so it copies straight across with no adaptation
+// needed beyond pulling the files into this repo's own assets/fx/.
+const COMBO_SWISH_PLAIN_IMG = loadImg("assets/fx/swish.png");
+const COMBO_SWISH_PLAIN_FRAME = 70;
+const COMBO_SWISH_COLORED_IMG = loadImg("assets/fx/blue_power_swish.png");
+const COMBO_SWISH_COLORED_FRAME = 138;
+const COMBO_SWISH_BIG_IMG = loadImg("assets/fx/blue_yellow_power_swish.png");
+const COMBO_SWISH_BIG_FRAME = 84;
+
+// level 0 = plain (tier 2), 1 = colored (tier 3), 2 = biggest (tier 5+) -
+// each level is its own distinct source image (see above), not one image
+// re-tinted/rescaled, so this is just a straight lookup + draw.
+const SWISH_LEVELS = [
+  { img: COMBO_SWISH_PLAIN_IMG, frame: COMBO_SWISH_PLAIN_FRAME },
+  { img: COMBO_SWISH_COLORED_IMG, frame: COMBO_SWISH_COLORED_FRAME },
+  { img: COMBO_SWISH_BIG_IMG, frame: COMBO_SWISH_BIG_FRAME },
+];
+
+export function drawComboSwish(ctx, x, y, level, rotation, scale) {
+  const { img, frame: nativeFrame } = SWISH_LEVELS[level] ?? SWISH_LEVELS[0];
+  if (!img.complete || img.naturalWidth === 0) return;
+  const size = nativeFrame * scale;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+  ctx.drawImage(img, -size / 2, -size / 2, size, size);
+  ctx.restore();
+}
+
+// The "pow"/"pop" burst layered on top of the big swish at the highest
+// combo tiers - same scale-up-and-fade treatment as drawHeadPop below
+// (single still burst image, not a frame sheet), just with two escalating
+// source images instead of one: small_pow for the first pow tier, red_pop
+// (more violent-looking, doubles as this game's biggest hit-reaction image)
+// for the tier after that.
+const COMBO_POW_IMG = loadImg("assets/fx/small_pow.png");
+const COMBO_POW_BIG_IMG = loadImg("assets/fx/red_pop.png");
+export const COMBO_POW_DURATION = 18;
+
+export function drawComboPow(ctx, x, y, t, big, scale = 1) {
+  const img = big ? COMBO_POW_BIG_IMG : COMBO_POW_IMG;
+  if (!img.complete || img.naturalWidth === 0) return;
+  const progress = Math.min(1, t / COMBO_POW_DURATION);
+  const growth = (0.6 + progress * 0.8) * scale;
+  const alpha = 1 - progress;
+  const size = img.naturalWidth * growth;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, x - size / 2, y - size / 2, size, size);
   ctx.restore();
 }
 
